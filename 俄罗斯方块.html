@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>俄罗斯方块</title>
+	<style>
+		div{
+			position: relative;
+			margin: 100px auto;
+			width: 600px;
+			height: 600px;
+			overflow: hidden;	
+		}
+		canvas{
+			float: left;
+		}
+		#cvs_left{
+			background-color: #333;
+		}
+		#cvs_fall{
+			margin-left: -360px;
+		}
+		#cvs_right{
+			background-color: rgb(120,196,236);
+		}
+
+	</style>
+
+	<script>
+		window.onload = function(){
+			//画布
+			var cvsPlay = document.getElementById('cvs_left');
+			var ctxPlay = cvsPlay.getContext("2d");
+			var cvsControl = document.getElementById('cvs_right');
+			var ctxControl = cvsControl.getContext("2d");
+			var cvsFall = document.getElementById('cvs_fall');
+			var ctxFall = cvsFall.getContext("2d");
+
+			var score = 0;		//得分
+			
+			var	cLen = 30,		//每个单位区域的边长
+				maxWidth =12,	//游戏区最大宽度（每行最多容纳的小方块数）
+				maxHeight =20;	//游戏区最大高度
+
+			var	isPaused = false,
+				isStopped = true;
+
+			var	timer = null,
+				interval = 800;	//间隔
+
+			//代表游戏区的数组
+			var chequer = new Array();
+			initChequer();
+
+			//存储所有形状的数组
+			var pieces = new Array();
+
+			//向数组添加形状，形状以二维数组的形式表达
+			addPiece([[1,1],[1,1]]);		//方型
+			addPiece([[1],[1],[1],[1]]);	//I型
+			addPiece([[1,1,1],[0,1,0]]);	//T型
+			addPiece([[1,0],[1,0],[1,1]]);	//L型
+			addPiece([[0,1],[0,1],[1,1]]);	//反L型
+			addPiece([[1,1,0],[0,1,1]]);	//z型
+			addPiece([[0,1,1],[1,1,0]]);	//反z型
+
+			//可自定义其他形状
+
+			//键盘事件
+			document.onkeydown = function(event){
+				if(isStopped){return;}
+
+				var e = event || window.event || arguments.callee.caller.arguments[0];
+				if(e && e.keyCode==37){
+					p.moveLeft();
+				} else if(e && e.keyCode==39){
+					p.moveRight();
+				} else if(e && e.keyCode==40 && !isPaused){
+					p.moveDown();
+				} else if(e && e.keyCode==38){
+					p.rotate();
+				} else if(e && e.keyCode==32){
+					if (isPaused) {goon();}
+					else{pause();}
+				}
+			}
+			
+			//绘制界面
+			ctxControl.save();
+			ctxControl.font = "18px '微软雅黑'";
+			ctxControl.fillStyle = "blue";
+			ctxControl.fillText("下一个：",30,45);
+			ctxControl.restore();		
+
+			ctxControl.save();
+			ctxControl.font = "18px '微软雅黑'";
+			ctxControl.fillStyle = "darkgreen";
+			ctxControl.fillText("键盘操作：",12,394);
+			ctxControl.fillText(" < 键左移",72,424);
+			ctxControl.fillText(" > 键右移",72,448);
+			ctxControl.fillText(" v  键下移",72,472);
+			ctxControl.fillText(" ^ 键旋转",72,496);
+			ctxControl.fillText("空格键暂停/继续",72,520);
+			ctxControl.restore();
+
+			ctxControl.save();
+			ctxControl.font = "16px '微软雅黑'";
+			ctxControl.fillStyle = "red";
+			ctxControl.fillText("未完待续...",144,584);
+			ctxControl.restore();
+
+			//开始
+			start();
+
+			////////////////////////////////////////////
+
+			//开始
+			function start(){
+				score = 0;
+				initChequer();
+				drawChequer();
+
+				nextP = getPiece();
+				prepareNextP();
+				refreshScore();
+
+				isStopped = false;
+				isPaused = false;
+
+				fall();
+			}
+			//停止
+			function stop(){
+				isStopped = true;
+				alert("本局得分："+score);
+			}
+			//暂停
+			function pause(){
+				isPaused = true;
+			}
+			//继续
+			function goon(){
+				isPaused = false;
+			}
+
+			//每隔 interval（毫秒）下降一次
+			function fall(){
+				if (isStopped) {
+					clearTimeout(timer);
+					return;
+				}
+				if (!isPaused) {
+					var s = p.moveDown();
+					switch(s)
+					{
+						case 1: //正常下降
+							break;
+
+						case 0: //到底了，固定碎片
+							isStopped = true;
+							ctxFall.clearRect(0,0,360,600);
+							fix(p);
+							clearLine();
+							refreshScore();
+							prepareNextP();
+							isStopped = false;
+							break;
+
+						case -1: //到底了，而且图形有一部分在游戏区外，游戏结束
+							stop();
+							break;
+					}
+				}
+				timer = setTimeout(fall,interval);
+			}				
+
+			//准备下一个碎片
+			function prepareNextP(){
+				p = nextP;
+				p.init();
+
+				nextP = getPiece();
+
+				//绘制下一个碎片的预览
+				drawNextP();				
+			}
+
+			function drawNextP(){
+				var ww =6, //window width
+					wh =5, //window height
+					wl = 1, //window left
+					wt = 2, //window top
+					ml = wl + (ww-nextP.width)/2, //margin left
+					mt = wt + (wh-nextP.height)/2; //margin top
+
+				ctxControl.save();
+				ctxControl.fillStyle = "#333333";
+				ctxControl.fillRect(wl*cLen,wt*cLen,ww*cLen,wh*cLen);
+				ctxControl.restore();
+
+				var i,j;
+				for (i = 0; i < nextP.height; i++) {
+					for (j = 0; j < nextP.width; j++) {
+						if (nextP.shape[i][j]==1) {
+							//绘制图形本身
+							fillRoundRect(ctxControl,
+								(ml+j)*cLen+1,
+								(mt+i)*cLen+1,
+								cLen-2,cLen-2,3);	
+						}
+					}
+				}				
+			}				
+
+			//初始化游戏区
+			function initChequer(){
+				var i,j;
+				for (i = 0; i < maxHeight; i++) {
+					if(!chequer[i]){ chequer[i]=new Array(); }
+					for (j = 0; j < maxWidth; j++) {
+						chequer[i][j]=0;
+					}
+				}
+			}
+			
+			//刷新分数
+			function refreshScore(){
+				var ww = 6, //window width 窗口宽
+					wh = 2, //window height 窗口高
+					wl = 1, //window left 左边距
+					wt = 8.5, //window top 上边距
+					txt = "得分："+score;	//得分信息
+
+				ctxControl.save();
+				ctxControl.fillStyle = "#333333";
+				ctxControl.fillRect(wl*cLen,wt*cLen,ww*cLen,wh*cLen);
+
+				ctxControl.font = "30px '微软雅黑'";
+				ctxControl.fillStyle = "orange";
+				ctxControl.fillText(txt,wl*cLen+15,wt*cLen+41);
+				ctxControl.restore();
+			}
+
+			//固定当前碎片
+			function fix(tp){
+				var i,j;
+				for (i = 0; i < tp.height; i++) {
+					for (j = 0; j < tp.width; j++) {
+						if (tp.shape[i][j] == 1) {
+							chequer[tp.top+i][tp.left+j] = 1;
+							fillRoundRect(ctxPlay,(tp.left+j)*cLen+1,(tp.top+i)*cLen+1,cLen-2,cLen-2,3,"rgb(194,109,26)");
+						}
+					}
+				}
+			}
+
+			//消去填满的行
+			function clearLine(){
+				var sum,lines=0;
+				var i,j;
+				for (i=maxHeight-1; i>=0; i--) {
+					sum = 0;
+					for (j = 0; j < maxWidth; j++) {
+						sum += chequer[i][j];
+					}
+
+					if (sum == maxWidth) {
+						chequer.splice(i,1);
+						lines++;
+					} else if (sum == 0) { break; }
+				}
+
+				for (i = 0; i < lines; i++) {
+					chequer.unshift([0,0,0,0,0,0,0,0,0,0,0,0]);
+				}
+
+				score += lines;
+				drawChequer();
+			}
+
+			//向 pieces 数组添加一个形状
+			function addPiece(shp){
+				pieces.push(new Piece(shp));
+			}
+
+			//随机获取一个碎片
+			function getPiece(){
+				return pieces[Math.ceil(Math.random()*10000)%100%pieces.length];
+			}
+
+			//重绘游戏区
+			function drawChequer(){
+				ctxPlay.clearRect(0,0,360,600);
+				for (var i = 0; i < maxHeight; i++) {
+					for (var j = 0; j < maxWidth; j++) {
+						if (chequer[i][j]==1) {
+							fillRoundRect(ctxPlay,j*cLen+1,i*cLen+1,cLen-2,cLen-2,3,"rgb(194,109,26)");
+						}
+					}
+				}
+			}
+
+			//画圆角矩形
+			function fillRoundRect(ctx, x, y, w, h, r, style) {
+			    if (w < 2 * r) {r = w / 2;}
+			    if (h < 2 * r){ r = h / 2;}
+			    ctx.save();
+			    if(style){ctx.fillStyle = style;}
+			    else{ctx.fillStyle = "orange";}
+			    ctx.beginPath();
+			    ctx.moveTo(x+r, y);
+			    ctx.arcTo(x+w, y, x+w, y+h, r);
+			    ctx.arcTo(x+w, y+h, x, y+h, r);
+			    ctx.arcTo(x, y+h, x, y, r);
+			    ctx.arcTo(x, y, x+w, y, r);
+			    ctx.closePath();
+			    ctx.fill(); 
+			    ctx.restore();
+			}
+
+
+			//定义碎片（piece）对象
+			function Piece(shp){
+				
+				this.initShape = shp;
+				this.shape = shp;
+				this.width = shp[0].length;
+				this.height = shp.length;
+
+				this.left = Math.floor((maxWidth - this.width)/2);
+				this.top = -this.height;
+				this.dockTop = maxHeight-this.height;
+
+				//初始化
+				this.init = function(){
+					this.shape = this.initShape;
+					this.width = this.shape[0].length;
+					this.height = this.shape.length;
+					this.left = Math.floor((maxWidth - this.width)/2);
+					this.top = -this.height;
+					this.computeDockTop();
+					//console.log(this.dockTop);
+				}
+
+				//左移
+				this.moveLeft = function(){
+					if (this.moveable(-1)) {
+						this.left--;
+						this.computeDockTop();
+						this.draw();
+					}
+				};
+
+				//右移
+				this.moveRight = function(){
+					if (this.moveable(1)) {
+						this.left++;
+						this.computeDockTop();
+						this.draw();
+					}				
+				};
+
+				//下移
+				this.moveDown = function(){
+					
+					if (this.top < this.dockTop) {
+						this.top++;
+						this.draw();
+						return 1;
+					} else if (this.top>=0) {
+						return 0;
+					} else {
+						return -1;
+					}
+				};
+
+				//旋转
+				//通过旋转数组来旋转图形
+				this.rotate = function(){
+					if (this.height==0) {return;}
+
+					//向右旋转
+					var tmp = new Array();
+					for (var i = 0; i < this.width; i++) {
+						tmp[i] = new Array();
+						for (var j = 0; j < this.height; j++) {
+							tmp[i][j] = this.shape[this.height-1-j][i];
+						}
+					}
+
+					this.shape = tmp;
+					this.width = this.height;
+					this.height = tmp.length;
+
+					this.left = Math.max(Math.min(this.left,maxWidth-this.width),0);
+					this.top = this.top+this.width-this.height;
+
+					this.computeDockTop();
+					this.draw();
+				};
+
+				//重绘
+				this.draw = function(){
+					ctxFall.clearRect(0,0,360,600);
+
+					var i,j;
+
+					ctxFall.save();
+					ctxFall.fillStyle = "lightblue";
+					for (i = 0; i < this.height; i++) {
+						for (j = 0; j < this.width; j++) {
+							if (this.shape[i][j]==1) {
+								//绘制落点预览
+								ctxFall.fillRect((this.left+j)*cLen,(this.dockTop+i)*cLen,cLen,cLen);
+
+								//绘制图形本身
+								fillRoundRect(ctxFall,
+									(this.left+j)*cLen+1,
+									(this.top+i)*cLen+1,
+									cLen-2,cLen-2,3);	
+							}
+						}
+					}
+					ctxFall.restore();
+				};
+
+				//计算落点
+				this.computeDockTop = function(){
+					var dtop = maxHeight-this.height;
+					var x,y,z;
+					for (x = 0; x <this.width; x++) {
+						for (y=this.height-1; y>=0; y--) {
+							if (this.shape[y][x]==1) {
+								for (z =this.top+y+1; z<maxHeight; z++) {
+									if (z<0) {z=0;}
+									if (chequer[z][this.left+x]==1) {break;}
+
+								}
+								dtop = Math.min(dtop, z-(y+1));
+								break;
+							}
+						}
+					}
+					this.dockTop = dtop;
+				}
+
+				//碰撞判断: dir<0 左移， dir>0 右移
+				this.moveable = function(dir){
+
+					var l =this.left,
+						t =this.top,
+						w =this.width,
+						h =this.height,
+						s =this.shape;
+					
+					if (arguments.length==0 || typeof dir != "number") {return;}
+
+					//右移检查
+					if (dir>0) {
+						//确保不穿壁
+						if (l+w == maxWidth) {return false;}
+
+						//确保不重合
+						for (var i=t<0?-t:0; i<h; i++) {
+							if (s[i][w-1] && chequer[t+i][l+w]) {return false;} 
+						}
+					} else if (dir<0) { //左移检查
+						if (l == 0) {return false;}
+						for (var i=t<0?-t:0; i<h; i++) {
+							if (s[i][0] && chequer[t+i][l-1]) {return false;}
+						}						
+					} else if (dir==0) { //下移检查
+						if (t+h == maxHeight) {return false;}
+						for (var i=0; i<w; i++) {
+							if (s[h-1][i] && chequer[t+h][l+i]) {return false;}
+						}
+					}
+					return true;
+				};
+			}
+			//碎片对象定义完成
+		}	
+	</script>
+</head>
+<body>
+	<div>
+		<canvas id="cvs_left" width="360" height="600"></canvas>
+		<canvas id="cvs_fall" width="360" height="600"></canvas>
+		<canvas id="cvs_right" width="240" height="600"></canvas>
+	</div>
+</body>
+</html>
